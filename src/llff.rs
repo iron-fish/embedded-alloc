@@ -84,6 +84,11 @@ impl Heap {
         self.max_used.fetch_max(current_used, Ordering::Relaxed);
     }
 
+    /// resets max used to 0
+    pub fn reset_max(&self) {
+        self.max_used.store(0, Ordering::Relaxed);
+    }
+
     /// Returns the maximum amount of heap memory used so far.
     pub fn max_used(&self) -> usize {
         self.max_used.load(Ordering::Relaxed)
