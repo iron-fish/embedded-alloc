@@ -1,6 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::RefCell;
 use core::ptr::{self, NonNull};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use critical_section::Mutex;
 use linked_list_allocator::Heap as LLHeap;
@@ -8,6 +9,7 @@ use linked_list_allocator::Heap as LLHeap;
 /// A linked list first fit heap.
 pub struct Heap {
     heap: Mutex<RefCell<LLHeap>>,
+    max_used: AtomicUsize,
 }
 
 impl Heap {
@@ -18,6 +20,7 @@ impl Heap {
     pub const fn empty() -> Heap {
         Heap {
             heap: Mutex::new(RefCell::new(LLHeap::empty())),
+            max_used: AtomicUsize::new(0),
         }
     }
 
@@ -66,12 +69,29 @@ impl Heap {
 
     fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
         critical_section::with(|cs| {
-            self.heap
-                .borrow(cs)
-                .borrow_mut()
-                .allocate_first_fit(layout)
-                .ok()
+            let mut heap = self.heap.borrow(cs).borrow_mut();
+            let result = heap.allocate_first_fit(layout).ok();
+            if result.is_some() {
+                let current_used = heap.used();
+                self.update_max_used(current_used);
+            }
+            result
         })
+    }
+
+    // New function to update max_used
+    fn update_max_used(&self, current_used: usize) {
+        self.max_used.fetch_max(current_used, Ordering::Relaxed);
+    }
+
+    /// resets max used to 0
+    pub fn reset_max(&self) {
+        self.max_used.store(0, Ordering::Relaxed);
+    }
+
+    /// Returns the maximum amount of heap memory used so far.
+    pub fn max_used(&self) -> usize {
+        self.max_used.load(Ordering::Relaxed)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
